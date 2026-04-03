@@ -80,7 +80,6 @@ function Login({ onLogin }) {
             {loading ? '登录中...' : '进入博客'}
           </button>
         </form>
-        <p className="login-hint">超管账号：root / admin</p>
       </div>
     </div>
   );

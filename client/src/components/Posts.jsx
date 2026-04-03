@@ -9,8 +9,12 @@ function Posts() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [currentRole, setCurrentRole] = useState('');
 
   useEffect(() => {
+    // 获取当前用户角色
+    const role = localStorage.getItem('role');
+    setCurrentRole(role);
     fetchPosts();
   }, [currentPage]);
 
@@ -54,6 +58,21 @@ function Posts() {
     }
   };
 
+  const handleDeletePost = async (postId) => {
+    if (!window.confirm('确定要删除这条帖子吗？删除后无法恢复！')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`/api/posts/${postId}`);
+      alert('删除成功');
+      fetchPosts();
+    } catch (error) {
+      alert(error.response?.data?.message || '删除失败');
+      console.error('删除失败:', error);
+    }
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleString('zh-CN', {
@@ -88,7 +107,19 @@ function Posts() {
           {posts.map(post => (
             <div key={post.id} className="post-card">
               <div className="post-header">
-                <span className="post-time">{formatDate(post.created_at)}</span>
+                <div>
+                  <span className="post-author">作者: {post.author || '匿名'}</span>
+                  <span className="post-time">{formatDate(post.created_at)}</span>
+                </div>
+                {currentRole === 'superadmin' && (
+                  <button 
+                    className="delete-button" 
+                    onClick={() => handleDeletePost(post.id)}
+                    title="删除帖子"
+                  >
+                    删除
+                  </button>
+                )}
               </div>
               <div className="post-content">{post.content}</div>
 

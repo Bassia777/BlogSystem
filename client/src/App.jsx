@@ -6,6 +6,7 @@ import Layout from './components/Layout';
 import Posts from './components/Posts';
 import Articles from './components/Articles';
 import UserManagement from './components/UserManagement';
+import Gallery from './components/Gallery';
 import './App.css';
 
 function App() {
@@ -57,6 +58,7 @@ function App() {
           <Route path="/" element={<Navigate to="/posts" replace />} />
           <Route path="/posts" element={<Posts />} />
           <Route path="/articles" element={<Articles />} />
+          <Route path="/gallery" element={<Gallery />} />
           <Route
             path="/users"
             element={

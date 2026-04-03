@@ -90,9 +90,34 @@
   margin-bottom: 15px;
 }
 
+.post-author {
+  color: #667eea;
+  font-size: 14px;
+  font-weight: 600;
+  margin-right: 15px;
+}
+
 .post-time {
   color: #999;
   font-size: 14px;
+}
+
+.delete-button {
+  padding: 6px 15px;
+  background: #ff4757;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.delete-button:hover {
+  background: #ff3838;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 71, 87, 0.3);
 }
 
 .post-content {

@@ -24,6 +24,12 @@ function Layout({ children, onLogout, role }) {
             >
               博文
             </Link>
+            <Link
+              to="/gallery"
+              className={`nav-link ${location.pathname === '/gallery' ? 'active' : ''}`}
+            >
+              图片长廊
+            </Link>
             {isSuper && (
               <Link
                 to="/users"

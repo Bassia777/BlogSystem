@@ -5,13 +5,47 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
 const DATA_FILE = path.join(__dirname, 'data.json');
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const SESSION_DAYS = 7;
 const CREDENTIAL_RE = /^[a-zA-Z0-9]{1,8}$/;
+
+// 确保uploads目录存在
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
+// 配置multer用于文件上传
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, UPLOADS_DIR);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = path.extname(file.originalname);
+    cb(null, 'image-' + uniqueSuffix + ext);
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 限制5MB
+  },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('只支持 PNG、JPG、GIF、WEBP 格式的图片'));
+    }
+  }
+});
 
 function loadData() {
   try {
@@ -37,27 +71,28 @@ function normalizeData(d) {
   if (!Array.isArray(d.posts)) d.posts = [];
   if (!Array.isArray(d.replies)) d.replies = [];
   if (!Array.isArray(d.articles)) d.articles = [];
+  if (!Array.isArray(d.images)) d.images = [];
   if (!d.settings || typeof d.settings !== 'object') d.settings = {};
 
   const now = Date.now();
   d.sessions = d.sessions.filter((s) => new Date(s.expiresAt).getTime() > now);
 
-  if (!d.users.some((u) => u.account === 'root')) {
-    const plain = 'admin';
+  if (!d.users.some((u) => u.account === 'admin')) {
+    const plain = '123';
     d.users.push({
       id: nextId(d.users),
-      account: 'root',
+      account: 'admin',
       passwordHash: bcrypt.hashSync(plain, 10),
       passwordPlain: plain,
       role: 'superadmin'
     });
   } else {
-    const rootUser = d.users.find((u) => u.account === 'root');
-    if (rootUser && !rootUser.passwordPlain) {
-      const plain = 'admin';
-      rootUser.passwordPlain = plain;
-      rootUser.passwordHash = bcrypt.hashSync(plain, 10);
-      rootUser.role = 'superadmin';
+    const adminUser = d.users.find((u) => u.account === 'admin');
+    if (adminUser && adminUser.passwordPlain !== '123') {
+      const plain = '123';
+      adminUser.passwordPlain = plain;
+      adminUser.passwordHash = bcrypt.hashSync(plain, 10);
+      adminUser.role = 'superadmin';
     }
   }
 
@@ -114,6 +149,7 @@ function requireSuperAdmin(req, res, next) {
 
 app.use(cors());
 app.use(bodyParser.json());
+app.use('/uploads', express.static(UPLOADS_DIR)); // 静态文件服务
 
 app.post('/api/auth/login', (req, res) => {
   const { account, password } = req.body || {};
@@ -258,11 +294,19 @@ app.get('/api/posts', (req, res) => {
 });
 
 app.post('/api/posts', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  
   const { content } = req.body;
   let data = normalizeData(loadData());
   const id = nextId(data.posts);
   const created_at = new Date().toISOString();
-  const post = { id, content, created_at };
+  const post = { 
+    id, 
+    content, 
+    created_at,
+    author: session.account  // 添加作者信息
+  };
   data.posts.push(post);
   saveData(data);
   res.json({ ...post, replies: [] });
@@ -281,6 +325,30 @@ app.post('/api/posts/:id/replies', (req, res) => {
   data.replies.push(reply);
   saveData(data);
   res.json(reply);
+});
+
+// 删除帖子 - 仅超管可删除
+app.delete('/api/posts/:id', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  if (session.role !== 'superadmin') {
+    return res.status(403).json({ message: '只有超管才能删除帖子' });
+  }
+  
+  const postId = parseInt(req.params.id, 10);
+  let data = normalizeData(loadData());
+  
+  const postIndex = data.posts.findIndex((p) => p.id === postId);
+  if (postIndex === -1) {
+    return res.status(404).json({ message: '帖子不存在' });
+  }
+  
+  // 删除帖子和相关回复
+  data.posts.splice(postIndex, 1);
+  data.replies = data.replies.filter((r) => r.post_id !== postId);
+  
+  saveData(data);
+  res.json({ success: true, message: '删除成功' });
 });
 
 app.get('/api/articles', (req, res) => {
@@ -313,6 +381,81 @@ app.post('/api/articles', (req, res) => {
   res.json(article);
 });
 
+// ============ 图片长廊 API ============
+
+// 获取所有图片
+app.get('/api/gallery', (req, res) => {
+  let data = normalizeData(loadData());
+  const images = [...data.images].sort(
+    (a, b) => new Date(b.created_at) - new Date(a.created_at)
+  );
+  res.json({ images });
+});
+
+// 上传图片
+app.post('/api/gallery', upload.single('image'), (req, res) => {
+  const session = getSession(req);
+  if (!session) {
+    // 删除已上传的文件
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    return res.status(401).json({ message: '未登录' });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({ message: '请选择图片文件' });
+  }
+
+  let data = normalizeData(loadData());
+  const id = nextId(data.images);
+  const created_at = new Date().toISOString();
+  const image = {
+    id,
+    filename: req.file.filename,
+    url: `/uploads/${req.file.filename}`,
+    author: session.account,
+    created_at
+  };
+
+  data.images.push(image);
+  saveData(data);
+  res.json({ success: true, image });
+});
+
+// 删除图片 - 超管或上传者本人可删除
+app.delete('/api/gallery/:id', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+
+  const imageId = parseInt(req.params.id, 10);
+  let data = normalizeData(loadData());
+
+  const imageIndex = data.images.findIndex((img) => img.id === imageId);
+  if (imageIndex === -1) {
+    return res.status(404).json({ message: '图片不存在' });
+  }
+
+  const image = data.images[imageIndex];
+
+  // 检查权限：超管或上传者本人
+  if (session.role !== 'superadmin' && session.account !== image.author) {
+    return res.status(403).json({ message: '只有超管和上传者本人可以删除图片' });
+  }
+
+  // 删除文件
+  const filepath = path.join(UPLOADS_DIR, image.filename);
+  if (fs.existsSync(filepath)) {
+    fs.unlinkSync(filepath);
+  }
+
+  // 从数据库删除
+  data.images.splice(imageIndex, 1);
+  saveData(data);
+
+  res.json({ success: true, message: '删除成功' });
+});
+
 // 生产环境：构建后的前端放在 client/dist，与 API 同端口同源（axios 生产环境不写 baseURL）
 const clientDist = path.join(__dirname, '../client/dist');
 if (fs.existsSync(path.join(clientDist, 'index.html'))) {
@@ -329,6 +472,6 @@ saveData(boot);
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`服务器运行在 http://0.0.0.0:${PORT} （公网请用云服务器公网 IP + 端口访问）`);
   console.log(
-    '[blog-api] 多用户模式：登录 POST /api/auth/login 需 JSON { account, password }，超管 root / admin'
+    '[blog-api] 多用户模式：登录 POST /api/auth/login 需 JSON { account, password }，超管 admin / 123'
   );
 });
