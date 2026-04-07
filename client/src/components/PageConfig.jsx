@@ -109,6 +109,10 @@ function PageConfig() {
       setMessage('保存成功！登录页轮播图已更新');
       setTimeout(() => setMessage(''), 3000);
       
+      // 清除登录页的缓存，强制下次重新获取
+      localStorage.removeItem('carousel_config');
+      localStorage.removeItem('carousel_config_time');
+      
       // 重新获取配置以刷新预览
       await fetchCarouselConfig();
     } catch (error) {

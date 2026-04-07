@@ -587,12 +587,24 @@ const carouselUpload = multer({
 });
 
 // 静态文件服务 - 轮播图
-app.use('/carousel', express.static(CAROUSEL_DIR));
+// 静态文件服务 - 轮播图（长期缓存）
+app.use('/carousel', express.static(CAROUSEL_DIR, {
+  maxAge: '7d', // 图片缓存7天
+  etag: true,
+  lastModified: true
+}));
 
 // 获取轮播图配置
 app.get('/api/settings/carousel', (req, res) => {
   let data = normalizeData(loadData());
   const carouselImages = data.settings.carouselImages || [];
+  
+  // 设置缓存控制头：浏览器可缓存24小时
+  res.set({
+    'Cache-Control': 'public, max-age=86400', // 24小时 = 86400秒
+    'ETag': `"carousel-${Date.now()}"` // 添加ETag用于验证
+  });
+  
   res.json({ images: carouselImages });
 });
 

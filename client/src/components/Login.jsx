@@ -17,6 +17,25 @@ function Login({ onLogin }) {
   const [currentSlide, setCurrentSlide] = useState(0);
 
   useEffect(() => {
+    // 优先从 localStorage 读取缓存的轮播图配置
+    const cachedConfig = localStorage.getItem('carousel_config');
+    const cachedTime = localStorage.getItem('carousel_config_time');
+    const now = Date.now();
+    
+    // 如果缓存存在且未过期（24小时内），直接使用缓存
+    if (cachedConfig && cachedTime && (now - parseInt(cachedTime)) < 24 * 60 * 60 * 1000) {
+      try {
+        const images = JSON.parse(cachedConfig);
+        if (images && images.length > 0) {
+          setCarouselImages(images);
+          return; // 使用缓存，不发起请求
+        }
+      } catch (e) {
+        console.error('解析缓存失败:', e);
+      }
+    }
+    
+    // 缓存不存在或已过期，从服务器获取
     fetchCarouselImages();
   }, []);
 
@@ -34,25 +53,36 @@ function Login({ onLogin }) {
       const response = await axios.get(`/api/settings/carousel?t=${Date.now()}`);
       console.log('登录页获取轮播图:', response.data);
       if (response.data.images && response.data.images.length > 0) {
+        const images = response.data.images;
+        
+        // 缓存配置到 localStorage（不带时间戳）
+        localStorage.setItem('carousel_config', JSON.stringify(images));
+        localStorage.setItem('carousel_config_time', Date.now().toString());
+        
         // 给每个图片URL添加时间戳避免缓存
-        const imagesWithTimestamp = response.data.images.map(url => 
+        const imagesWithTimestamp = images.map(url => 
           `${url}?t=${Date.now()}`
         );
         setCarouselImages(imagesWithTimestamp);
       } else {
-        setCarouselImages([
-          `/team-bg.png?t=${Date.now()}`,
-          `/p2.png?t=${Date.now()}`,
-          `/p3.png?t=${Date.now()}`
-        ]);
+        const defaultImages = [
+          '/team-bg.png',
+          '/p2.png',
+          '/p3.png'
+        ];
+        localStorage.setItem('carousel_config', JSON.stringify(defaultImages));
+        localStorage.setItem('carousel_config_time', Date.now().toString());
+        setCarouselImages(defaultImages.map(url => `${url}?t=${Date.now()}`));
       }
     } catch (error) {
       console.error('获取轮播图失败:', error);
-      setCarouselImages([
-        `/team-bg.png?t=${Date.now()}`,
-        `/p2.png?t=${Date.now()}`,
-        `/p3.png?t=${Date.now()}`
-      ]);
+      // 失败时使用默认图片
+      const defaultImages = [
+        '/team-bg.png',
+        '/p2.png',
+        '/p3.png'
+      ];
+      setCarouselImages(defaultImages.map(url => `${url}?t=${Date.now()}`));
     }
   };
 
