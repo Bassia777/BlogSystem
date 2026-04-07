@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Login.css';
 
@@ -13,6 +13,48 @@ function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [carouselImages, setCarouselImages] = useState([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
+
+  useEffect(() => {
+    fetchCarouselImages();
+  }, []);
+
+  useEffect(() => {
+    if (carouselImages.length > 1) {
+      const timer = setInterval(() => {
+        setCurrentSlide((prev) => (prev + 1) % carouselImages.length);
+      }, 5000);
+      return () => clearInterval(timer);
+    }
+  }, [carouselImages.length]);
+
+  const fetchCarouselImages = async () => {
+    try {
+      const response = await axios.get(`/api/settings/carousel?t=${Date.now()}`);
+      console.log('登录页获取轮播图:', response.data);
+      if (response.data.images && response.data.images.length > 0) {
+        // 给每个图片URL添加时间戳避免缓存
+        const imagesWithTimestamp = response.data.images.map(url => 
+          `${url}?t=${Date.now()}`
+        );
+        setCarouselImages(imagesWithTimestamp);
+      } else {
+        setCarouselImages([
+          `/team-bg.png?t=${Date.now()}`,
+          `/p2.png?t=${Date.now()}`,
+          `/p3.png?t=${Date.now()}`
+        ]);
+      }
+    } catch (error) {
+      console.error('获取轮播图失败:', error);
+      setCarouselImages([
+        `/team-bg.png?t=${Date.now()}`,
+        `/p2.png?t=${Date.now()}`,
+        `/p3.png?t=${Date.now()}`
+      ]);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -45,41 +87,131 @@ function Login({ onLogin }) {
     }
   };
 
+  const handleGuestLogin = () => {
+    localStorage.setItem('token', 'guest');
+    localStorage.setItem('account', 'guest');
+    localStorage.setItem('role', 'guest');
+    onLogin({ account: 'guest', role: 'guest' });
+  };
+
+  const goToSlide = (index) => {
+    setCurrentSlide(index);
+  };
+
   return (
     <div className="login-container">
-      <div className="login-box">
-        <h1 className="login-title">个人博客系统</h1>
-        <p className="login-subtitle">请输入账号与密码（字母或数字，各不超过8位）</p>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <input
-              type="text"
-              className="form-input"
-              placeholder="账号"
-              value={account}
-              onChange={(e) => setAccount(sanitizeCredential(e.target.value))}
-              disabled={loading}
-              autoComplete="username"
-              maxLength={8}
+      <div className="login-left">
+        <div className="carousel-container">
+          {carouselImages.map((image, index) => (
+            <div
+              key={index}
+              className={`carousel-slide ${index === currentSlide ? 'active' : ''}`}
+            >
+              <img 
+                src={image} 
+                alt={`轮播图 ${index + 1}`} 
+                className="login-bg-image"
+                onError={(e) => {
+                  console.error(`图片加载失败: ${image}`);
+                  e.target.style.display = 'none';
+                }}
+                onLoad={() => {
+                  console.log(`图片加载成功: ${image}`);
+                }}
+              />
+            </div>
+          ))}
+          
+          {/* 左右切换按钮 */}
+          {carouselImages.length > 1 && (
+            <>
+              <button 
+                className="carousel-arrow carousel-arrow-left"
+                onClick={() => {
+                  setCurrentSlide((prev) => 
+                    prev === 0 ? carouselImages.length - 1 : prev - 1
+                  );
+                }}
+                aria-label="上一张"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+              </button>
+              
+              <button 
+                className="carousel-arrow carousel-arrow-right"
+                onClick={() => {
+                  setCurrentSlide((prev) => 
+                    prev === carouselImages.length - 1 ? 0 : prev + 1
+                  );
+                }}
+                aria-label="下一张"
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+              </button>
+            </>
+          )}
+        </div>
+        <div className="carousel-dots">
+          {carouselImages.map((_, index) => (
+            <button
+              key={index}
+              className={`carousel-dot ${index === currentSlide ? 'active' : ''}`}
+              onClick={() => goToSlide(index)}
+              aria-label={`切换到第 ${index + 1} 张图片`}
             />
+          ))}
+        </div>
+      </div>
+      <div className="login-right">
+        <div className="login-box">
+          <h1 className="login-title">个人博客系统</h1>
+          <p className="login-subtitle">请输入账号与密码（字母或数字，各不超过8位）</p>
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <input
+                type="text"
+                className="form-input"
+                placeholder="账号"
+                value={account}
+                onChange={(e) => setAccount(sanitizeCredential(e.target.value))}
+                disabled={loading}
+                autoComplete="username"
+                maxLength={8}
+              />
+            </div>
+            <div className="form-group">
+              <input
+                type="password"
+                className="form-input"
+                placeholder="密码"
+                value={password}
+                onChange={(e) => setPassword(sanitizeCredential(e.target.value))}
+                disabled={loading}
+                autoComplete="current-password"
+                maxLength={8}
+              />
+            </div>
+            {error && <div className="error-message">{error}</div>}
+            <button type="submit" className="login-button" disabled={loading}>
+              {loading ? '登录中...' : '进入博客'}
+            </button>
+          </form>
+          <div className="guest-divider">
+            <span>或</span>
           </div>
-          <div className="form-group">
-            <input
-              type="password"
-              className="form-input"
-              placeholder="密码"
-              value={password}
-              onChange={(e) => setPassword(sanitizeCredential(e.target.value))}
-              disabled={loading}
-              autoComplete="current-password"
-              maxLength={8}
-            />
-          </div>
-          {error && <div className="error-message">{error}</div>}
-          <button type="submit" className="login-button" disabled={loading}>
-            {loading ? '登录中...' : '进入博客'}
+          <button 
+            type="button" 
+            className="guest-button" 
+            onClick={handleGuestLogin}
+            disabled={loading}
+          >
+            游客模式
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );

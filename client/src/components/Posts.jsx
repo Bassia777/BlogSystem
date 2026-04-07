@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Posts.css';
 
-function Posts() {
+function Posts({ isGuest }) {
   const [posts, setPosts] = useState([]);
   const [newPost, setNewPost] = useState('');
   const [replyContent, setReplyContent] = useState({});
@@ -10,11 +10,13 @@ function Posts() {
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(false);
   const [currentRole, setCurrentRole] = useState('');
+  const [currentAccount, setCurrentAccount] = useState('');
 
   useEffect(() => {
-    // 获取当前用户角色
     const role = localStorage.getItem('role');
+    const account = localStorage.getItem('account');
     setCurrentRole(role);
+    setCurrentAccount(account);
     fetchPosts();
   }, [currentPage]);
 
@@ -73,6 +75,21 @@ function Posts() {
     }
   };
 
+  const handleDeleteReply = async (postId, replyId) => {
+    if (!window.confirm('确定要删除这条评论吗？')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`/api/posts/${postId}/replies/${replyId}`);
+      alert('删除成功');
+      fetchPosts();
+    } catch (error) {
+      alert(error.response?.data?.message || '删除失败');
+      console.error('删除失败:', error);
+    }
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     return date.toLocaleString('zh-CN', {
@@ -86,19 +103,21 @@ function Posts() {
 
   return (
     <div className="posts-container">
-      <div className="post-form-card">
-        <h2 className="section-title">发布随笔</h2>
-        <form onSubmit={handlePostSubmit}>
-          <textarea
-            className="post-textarea"
-            placeholder="分享你的想法..."
-            value={newPost}
-            onChange={(e) => setNewPost(e.target.value)}
-            rows="4"
-          />
-          <button type="submit" className="submit-button">发布</button>
-        </form>
-      </div>
+      {!isGuest && (
+        <div className="post-form-card">
+          <h2 className="section-title">发布随笔</h2>
+          <form onSubmit={handlePostSubmit}>
+            <textarea
+              className="post-textarea"
+              placeholder="分享你的想法..."
+              value={newPost}
+              onChange={(e) => setNewPost(e.target.value)}
+              rows="4"
+            />
+            <button type="submit" className="submit-button">发布</button>
+          </form>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading">加载中...</div>
@@ -111,7 +130,7 @@ function Posts() {
                   <span className="post-author">作者: {post.author || '匿名'}</span>
                   <span className="post-time">{formatDate(post.created_at)}</span>
                 </div>
-                {currentRole === 'superadmin' && (
+                {!isGuest && currentRole === 'superadmin' && (
                   <button 
                     className="delete-button" 
                     onClick={() => handleDeletePost(post.id)}
@@ -128,33 +147,49 @@ function Posts() {
                   <div className="replies-title">回复 ({post.replies.length})</div>
                   {post.replies.map(reply => (
                     <div key={reply.id} className="reply-item">
-                      <div className="reply-time">{formatDate(reply.created_at)}</div>
+                      <div className="reply-header">
+                        <div className="reply-info">
+                          <span className="reply-author">{reply.author || '匿名'}</span>
+                          <span className="reply-time">{formatDate(reply.created_at)}</span>
+                        </div>
+                        {!isGuest && (currentRole === 'superadmin' || currentAccount === reply.author) && (
+                          <button
+                            className="reply-delete-button"
+                            onClick={() => handleDeleteReply(post.id, reply.id)}
+                            title="删除评论"
+                          >
+                            删除
+                          </button>
+                        )}
+                      </div>
                       <div className="reply-content">{reply.content}</div>
                     </div>
                   ))}
                 </div>
               )}
 
-              <div className="reply-form">
-                <input
-                  type="text"
-                  className="reply-input"
-                  placeholder="写下你的回复..."
-                  value={replyContent[post.id] || ''}
-                  onChange={(e) => setReplyContent({ ...replyContent, [post.id]: e.target.value })}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      handleReplySubmit(post.id);
-                    }
-                  }}
-                />
-                <button
-                  className="reply-button"
-                  onClick={() => handleReplySubmit(post.id)}
-                >
-                  回复
-                </button>
-              </div>
+              {!isGuest && (
+                <div className="reply-form">
+                  <input
+                    type="text"
+                    className="reply-input"
+                    placeholder="写下你的回复..."
+                    value={replyContent[post.id] || ''}
+                    onChange={(e) => setReplyContent({ ...replyContent, [post.id]: e.target.value })}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        handleReplySubmit(post.id);
+                      }
+                    }}
+                  />
+                  <button
+                    className="reply-button"
+                    onClick={() => handleReplySubmit(post.id)}
+                  >
+                    回复
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

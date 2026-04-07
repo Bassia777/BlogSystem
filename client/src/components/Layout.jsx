@@ -5,6 +5,7 @@ import './Layout.css';
 function Layout({ children, onLogout, role }) {
   const location = useLocation();
   const isSuper = role === 'superadmin';
+  const isGuest = role === 'guest';
 
   return (
     <div className="layout">
@@ -30,16 +31,24 @@ function Layout({ children, onLogout, role }) {
             >
               图片长廊
             </Link>
-            {isSuper && (
-              <Link
-                to="/users"
-                className={`nav-link ${location.pathname === '/users' ? 'active' : ''}`}
-              >
-                用户管理
-              </Link>
+            {isSuper && !isGuest && (
+              <>
+                <Link
+                  to="/users"
+                  className={`nav-link ${location.pathname === '/users' ? 'active' : ''}`}
+                >
+                  用户管理
+                </Link>
+                <Link
+                  to="/page-config"
+                  className={`nav-link ${location.pathname === '/page-config' ? 'active' : ''}`}
+                >
+                  页面配置
+                </Link>
+              </>
             )}
             <button type="button" onClick={onLogout} className="logout-button">
-              退出登录
+              {isGuest ? '退出游客模式' : '退出登录'}
             </button>
           </div>
         </div>

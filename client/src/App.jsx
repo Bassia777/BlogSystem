@@ -7,6 +7,7 @@ import Posts from './components/Posts';
 import Articles from './components/Articles';
 import UserManagement from './components/UserManagement';
 import Gallery from './components/Gallery';
+import PageConfig from './components/PageConfig';
 import './App.css';
 
 function App() {
@@ -21,7 +22,9 @@ function App() {
     const account = localStorage.getItem('account');
     const role = localStorage.getItem('role');
     if (token && account) {
-      axios.defaults.headers.common.Authorization = `Bearer ${token}`;
+      if (role !== 'guest') {
+        axios.defaults.headers.common.Authorization = `Bearer ${token}`;
+      }
       setAuth({ token, account, role });
     }
   }, []);
@@ -35,12 +38,14 @@ function App() {
   };
 
   const handleLogout = async () => {
-    try {
-      await axios.post('/api/auth/logout');
-    } catch {
-      /* ignore */
+    if (auth.role !== 'guest') {
+      try {
+        await axios.post('/api/auth/logout');
+      } catch {
+        /* ignore */
+      }
+      delete axios.defaults.headers.common.Authorization;
     }
-    delete axios.defaults.headers.common.Authorization;
     localStorage.removeItem('token');
     localStorage.removeItem('account');
     localStorage.removeItem('role');
@@ -51,19 +56,31 @@ function App() {
     return <Login onLogin={handleLogin} />;
   }
 
+  const isGuest = auth.role === 'guest';
+
   return (
     <Router>
       <Layout onLogout={handleLogout} role={auth.role}>
         <Routes>
           <Route path="/" element={<Navigate to="/posts" replace />} />
-          <Route path="/posts" element={<Posts />} />
-          <Route path="/articles" element={<Articles />} />
-          <Route path="/gallery" element={<Gallery />} />
+          <Route path="/posts" element={<Posts isGuest={isGuest} />} />
+          <Route path="/articles" element={<Articles isGuest={isGuest} />} />
+          <Route path="/gallery" element={<Gallery isGuest={isGuest} />} />
           <Route
             path="/users"
             element={
               auth.role === 'superadmin' ? (
                 <UserManagement />
+              ) : (
+                <Navigate to="/posts" replace />
+              )
+            }
+          />
+          <Route
+            path="/page-config"
+            element={
+              auth.role === 'superadmin' ? (
+                <PageConfig />
               ) : (
                 <Navigate to="/posts" replace />
               )

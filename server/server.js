@@ -313,6 +313,9 @@ app.post('/api/posts', (req, res) => {
 });
 
 app.post('/api/posts/:id/replies', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  
   const postId = parseInt(req.params.id, 10);
   const { content } = req.body;
   let data = normalizeData(loadData());
@@ -321,10 +324,40 @@ app.post('/api/posts/:id/replies', (req, res) => {
   }
   const id = nextId(data.replies);
   const created_at = new Date().toISOString();
-  const reply = { id, post_id: postId, content, created_at };
+  const reply = { 
+    id, 
+    post_id: postId, 
+    content, 
+    created_at,
+    author: session.account
+  };
   data.replies.push(reply);
   saveData(data);
   res.json(reply);
+});
+
+// 删除评论 - 超管或评论作者可删除
+app.delete('/api/posts/:postId/replies/:replyId', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  
+  const postId = parseInt(req.params.postId, 10);
+  const replyId = parseInt(req.params.replyId, 10);
+  let data = normalizeData(loadData());
+  
+  const replyIndex = data.replies.findIndex((r) => r.id === replyId && r.post_id === postId);
+  if (replyIndex === -1) {
+    return res.status(404).json({ message: '评论不存在' });
+  }
+  
+  const reply = data.replies[replyIndex];
+  if (session.role !== 'superadmin' && reply.author !== session.account) {
+    return res.status(403).json({ message: '只能删除自己的评论' });
+  }
+  
+  data.replies.splice(replyIndex, 1);
+  saveData(data);
+  res.json({ success: true, message: '删除成功' });
 });
 
 // 删除帖子 - 仅超管可删除
@@ -368,6 +401,9 @@ app.get('/api/articles/:id', (req, res) => {
 });
 
 app.post('/api/articles', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  
   const { title, content } = req.body;
   if (content && content.length > 2000) {
     return res.status(400).json({ message: '文章内容不能超过2000字' });
@@ -375,10 +411,70 @@ app.post('/api/articles', (req, res) => {
   let data = normalizeData(loadData());
   const id = nextId(data.articles);
   const created_at = new Date().toISOString();
-  const article = { id, title, content, created_at };
+  const article = { 
+    id, 
+    title, 
+    content, 
+    created_at,
+    author: session.account
+  };
   data.articles.push(article);
   saveData(data);
   res.json(article);
+});
+
+// 编辑文章 - 超管或作者本人可编辑
+app.put('/api/articles/:id', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  
+  const articleId = parseInt(req.params.id, 10);
+  const { title, content } = req.body;
+  
+  if (content && content.length > 2000) {
+    return res.status(400).json({ message: '文章内容不能超过2000字' });
+  }
+  
+  let data = normalizeData(loadData());
+  const article = data.articles.find((a) => a.id === articleId);
+  
+  if (!article) {
+    return res.status(404).json({ message: '文章不存在' });
+  }
+  
+  if (session.role !== 'superadmin' && article.author !== session.account) {
+    return res.status(403).json({ message: '只能编辑自己的文章' });
+  }
+  
+  article.title = title;
+  article.content = content;
+  article.updated_at = new Date().toISOString();
+  
+  saveData(data);
+  res.json(article);
+});
+
+// 删除文章 - 超管或作者本人可删除
+app.delete('/api/articles/:id', (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ message: '未登录' });
+  
+  const articleId = parseInt(req.params.id, 10);
+  let data = normalizeData(loadData());
+  
+  const articleIndex = data.articles.findIndex((a) => a.id === articleId);
+  if (articleIndex === -1) {
+    return res.status(404).json({ message: '文章不存在' });
+  }
+  
+  const article = data.articles[articleIndex];
+  if (session.role !== 'superadmin' && article.author !== session.account) {
+    return res.status(403).json({ message: '只能删除自己的文章' });
+  }
+  
+  data.articles.splice(articleIndex, 1);
+  saveData(data);
+  res.json({ success: true, message: '删除成功' });
 });
 
 // ============ 图片长廊 API ============
@@ -454,6 +550,79 @@ app.delete('/api/gallery/:id', (req, res) => {
   saveData(data);
 
   res.json({ success: true, message: '删除成功' });
+});
+
+// ============ 页面配置 API ============
+
+// 确保carousel目录存在
+const CAROUSEL_DIR = path.join(__dirname, 'carousel');
+if (!fs.existsSync(CAROUSEL_DIR)) {
+  fs.mkdirSync(CAROUSEL_DIR, { recursive: true });
+}
+
+// 配置轮播图上传
+const carouselStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, CAROUSEL_DIR);
+  },
+  filename: function (req, file, cb) {
+    const ext = path.extname(file.originalname);
+    cb(null, 'carousel-' + Date.now() + '-' + Math.round(Math.random() * 1E9) + ext);
+  }
+});
+
+const carouselUpload = multer({
+  storage: carouselStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024
+  },
+  fileFilter: function (req, file, cb) {
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('只支持 PNG、JPG、GIF、WEBP 格式的图片'));
+    }
+  }
+});
+
+// 静态文件服务 - 轮播图
+app.use('/carousel', express.static(CAROUSEL_DIR));
+
+// 获取轮播图配置
+app.get('/api/settings/carousel', (req, res) => {
+  let data = normalizeData(loadData());
+  const carouselImages = data.settings.carouselImages || [];
+  res.json({ images: carouselImages });
+});
+
+// 上传轮播图
+app.post('/api/settings/carousel/upload', requireSuperAdmin, carouselUpload.single('image'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: '请选择图片文件' });
+  }
+
+  const url = `/carousel/${req.file.filename}`;
+  res.json({ 
+    success: true, 
+    url,
+    filename: req.file.filename 
+  });
+});
+
+// 保存轮播图配置
+app.post('/api/settings/carousel', requireSuperAdmin, (req, res) => {
+  const { images } = req.body;
+  
+  if (!Array.isArray(images)) {
+    return res.status(400).json({ message: '图片列表格式错误' });
+  }
+
+  let data = normalizeData(loadData());
+  data.settings.carouselImages = images.filter(img => img);
+  saveData(data);
+
+  res.json({ success: true, message: '保存成功' });
 });
 
 // 生产环境：构建后的前端放在 client/dist，与 API 同端口同源（axios 生产环境不写 baseURL）

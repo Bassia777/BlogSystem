@@ -1,0 +1,223 @@
+.page-config-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.config-header {
+  margin-bottom: 40px;
+}
+
+.config-title {
+  font-size: 32px;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 10px;
+}
+
+.config-subtitle {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.success-message {
+  background: #f0f9ff;
+  color: #409eff;
+  padding: 14px 20px;
+  border-radius: 4px;
+  margin-bottom: 30px;
+  border: 1px solid #c6e2ff;
+  font-weight: 500;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.carousel-config-section {
+  background: white;
+  border-radius: 8px;
+  padding: 40px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  margin-bottom: 30px;
+}
+
+.section-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 30px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.carousel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 30px;
+}
+
+.carousel-item-config {
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  padding: 20px;
+  transition: all 0.3s ease;
+}
+
+.carousel-item-config:hover {
+  border-color: #409eff;
+  box-shadow: 0 2px 12px rgba(64, 158, 255, 0.08);
+}
+
+.carousel-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.carousel-item-header h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #303133;
+  margin: 0;
+}
+
+.delete-image-button {
+  padding: 7px 15px;
+  background: #f56c6c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.delete-image-button:hover {
+  background: #f78989;
+}
+
+.image-upload-area {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px dashed #dcdfe6;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #fafafa;
+  transition: all 0.3s ease;
+}
+
+.image-upload-area:hover {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #909399;
+}
+
+.upload-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 10px;
+  opacity: 0.6;
+}
+
+.upload-placeholder p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.image-preview {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.upload-button-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+  padding: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.image-upload-area:hover .upload-button-overlay {
+  opacity: 1;
+}
+
+.upload-text {
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.image-hint {
+  font-size: 13px;
+  color: #909399;
+  margin-top: 10px;
+  margin-bottom: 0;
+}
+
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 15px;
+}
+
+.save-button {
+  padding: 12px 32px;
+  background: #409eff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.save-button:hover:not(:disabled) {
+  background: #66b1ff;
+}
+
+.save-button:active:not(:disabled) {
+  background: #3a8ee6;
+}
+
+.save-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

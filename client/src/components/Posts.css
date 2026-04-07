@@ -153,10 +153,44 @@
   margin-bottom: 0;
 }
 
+.reply-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.reply-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.reply-author {
+  color: #667eea;
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .reply-time {
   color: #999;
   font-size: 12px;
-  margin-bottom: 5px;
+}
+
+.reply-delete-button {
+  padding: 4px 10px;
+  background: #ff6b6b;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.reply-delete-button:hover {
+  background: #ff5252;
+  transform: scale(1.05);
 }
 
 .reply-content {

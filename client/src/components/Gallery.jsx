@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './Gallery.css';
 
-function Gallery() {
+function Gallery({ isGuest }) {
   const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -33,14 +33,12 @@ function Gallery() {
     const file = e.target.files[0];
     if (!file) return;
 
-    // 检查文件类型
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
     if (!validTypes.includes(file.type)) {
       alert('只支持 PNG、JPG、JPEG、GIF、WEBP 格式的图片');
       return;
     }
 
-    // 检查文件大小（限制5MB）
     if (file.size > 5 * 1024 * 1024) {
       alert('图片大小不能超过5MB');
       return;
@@ -58,7 +56,7 @@ function Gallery() {
       });
       alert('上传成功');
       fetchImages();
-      e.target.value = ''; // 清空文件选择
+      e.target.value = '';
     } catch (error) {
       alert(error.response?.data?.message || '上传失败');
       console.error('上传失败:', error);
@@ -68,7 +66,6 @@ function Gallery() {
   };
 
   const handleDelete = async (imageId, imageAuthor) => {
-    // 检查权限：超管或上传者本人
     if (currentRole !== 'superadmin' && currentUser !== imageAuthor) {
       alert('只有超管和上传者本人可以删除图片');
       return;
@@ -103,19 +100,21 @@ function Gallery() {
     <div className="gallery-container">
       <div className="gallery-header">
         <h2 className="gallery-title">图片长廊</h2>
-        <div className="upload-section">
-          <label className="upload-button">
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
-              onChange={handleFileChange}
-              disabled={uploading}
-              style={{ display: 'none' }}
-            />
-            {uploading ? '上传中...' : '上传图片'}
-          </label>
-          <p className="upload-hint">支持 PNG、JPG、GIF、WEBP 格式，最大5MB</p>
-        </div>
+        {!isGuest && (
+          <div className="upload-section">
+            <label className="upload-button">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+                onChange={handleFileChange}
+                disabled={uploading}
+                style={{ display: 'none' }}
+              />
+              {uploading ? '上传中...' : '上传图片'}
+            </label>
+            <p className="upload-hint">支持 PNG、JPG、GIF、WEBP 格式，最大5MB</p>
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -141,7 +140,7 @@ function Gallery() {
                   <span className="image-author">上传者: {image.author}</span>
                   <span className="image-time">{formatDate(image.created_at)}</span>
                 </div>
-                {(currentRole === 'superadmin' || currentUser === image.author) && (
+                {!isGuest && (currentRole === 'superadmin' || currentUser === image.author) && (
                   <button
                     className="image-delete-button"
                     onClick={() => handleDelete(image.id, image.author)}
