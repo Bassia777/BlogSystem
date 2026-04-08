@@ -7,6 +7,7 @@ import Posts from './components/Posts';
 import Articles from './components/Articles';
 import UserManagement from './components/UserManagement';
 import Gallery from './components/Gallery';
+import Files from './components/Files';
 import PageConfig from './components/PageConfig';
 import './App.css';
 
@@ -66,6 +67,7 @@ function App() {
           <Route path="/posts" element={<Posts isGuest={isGuest} />} />
           <Route path="/articles" element={<Articles isGuest={isGuest} />} />
           <Route path="/gallery" element={<Gallery isGuest={isGuest} />} />
+          <Route path="/files" element={<Files isGuest={isGuest} />} />
           <Route
             path="/users"
             element={

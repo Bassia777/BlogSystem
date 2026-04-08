@@ -31,6 +31,12 @@ function Layout({ children, onLogout, role }) {
             >
               图片长廊
             </Link>
+            <Link
+              to="/files"
+              className={`nav-link ${location.pathname === '/files' ? 'active' : ''}`}
+            >
+              文件管理
+            </Link>
             {isSuper && !isGuest && (
               <>
                 <Link

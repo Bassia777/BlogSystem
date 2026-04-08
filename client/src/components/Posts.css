@@ -90,11 +90,16 @@
   margin-bottom: 15px;
 }
 
+.post-meta {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
 .post-author {
   color: #667eea;
   font-size: 14px;
   font-weight: 600;
-  margin-right: 15px;
 }
 
 .post-time {
@@ -102,7 +107,7 @@
   font-size: 14px;
 }
 
-.delete-button {
+.delete-post-button {
   padding: 6px 15px;
   background: #ff4757;
   color: white;
@@ -112,9 +117,10 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
+  white-space: nowrap;
 }
 
-.delete-button:hover {
+.delete-post-button:hover {
   background: #ff3838;
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(255, 71, 87, 0.3);
@@ -202,6 +208,7 @@
 .reply-form {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
 
 .reply-input {
@@ -219,6 +226,11 @@
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
+.reply-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .reply-button {
   padding: 10px 20px;
   background: #667eea;
@@ -228,10 +240,28 @@
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
+  white-space: nowrap;
 }
 
 .reply-button:hover {
   background: #5568d3;
+  transform: translateY(-1px);
+}
+
+.delete-post-button {
+  padding: 10px 20px;
+  background: #ff4757;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.delete-post-button:hover {
+  background: #ff3838;
   transform: translateY(-1px);
 }
 

@@ -72,6 +72,7 @@ function normalizeData(d) {
   if (!Array.isArray(d.replies)) d.replies = [];
   if (!Array.isArray(d.articles)) d.articles = [];
   if (!Array.isArray(d.images)) d.images = [];
+  if (!Array.isArray(d.files)) d.files = [];
   if (!d.settings || typeof d.settings !== 'object') d.settings = {};
 
   const now = Date.now();
@@ -635,6 +636,177 @@ app.post('/api/settings/carousel', requireSuperAdmin, (req, res) => {
   saveData(data);
 
   res.json({ success: true, message: '保存成功' });
+});
+
+// ============ 文件管理 API ============
+
+// 确保files目录存在
+const FILES_DIR = path.join(__dirname, 'files');
+if (!fs.existsSync(FILES_DIR)) {
+  fs.mkdirSync(FILES_DIR, { recursive: true });
+}
+
+// 配置文件上传（支持多种文件类型）
+const fileStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, FILES_DIR);
+  },
+  filename: function (req, file, cb) {
+    // 使用时间戳 + 随机数作为文件名，避免中文乱码
+    const ext = path.extname(file.originalname);
+    const timestamp = Date.now();
+    const random = Math.round(Math.random() * 1E9);
+    cb(null, `file-${timestamp}-${random}${ext}`);
+  }
+});
+
+const fileUpload = multer({
+  storage: fileStorage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 限制50MB
+  },
+  fileFilter: function (req, file, cb) {
+    // 支持的文件类型
+    const allowedTypes = [
+      // 文档
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      // Excel
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      // PPT
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      // 文本
+      'text/plain',
+      'text/markdown',
+      'text/csv',
+      'text/x-markdown',
+      'application/octet-stream', // 某些浏览器将.md识别为此类型
+      // 图片
+      'image/png',
+      'image/jpeg',
+      'image/jpg',
+      'image/gif',
+      'image/webp',
+      'image/svg+xml',
+      // 压缩包
+      'application/zip',
+      'application/x-rar-compressed',
+      'application/x-7z-compressed',
+      // 其他
+      'application/json',
+      'application/xml'
+    ];
+    
+    // 对于.md文件，特殊处理
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.md' || ext === '.markdown') {
+      cb(null, true);
+      return;
+    }
+    
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('不支持的文件类型：' + file.mimetype));
+    }
+  }
+});
+
+// 静态文件服务 - 文件管理（支持预览和下载）
+app.use('/files', express.static(FILES_DIR, {
+  maxAge: '1d',
+  etag: true,
+  lastModified: true
+}));
+
+// 获取文件列表
+app.get('/api/files', (req, res) => {
+  let data = normalizeData(loadData());
+  if (!Array.isArray(data.files)) {
+    data.files = [];
+  }
+  res.json({ files: data.files });
+});
+
+// 上传文件（仅超管）
+app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: '请选择文件' });
+  }
+
+  const { originalname, filename, mimetype, size } = req.file;
+  const url = `/files/${filename}`;
+  
+  // 处理中文文件名编码问题
+  let decodedOriginalName = originalname;
+  try {
+    // 尝试解码可能的乱码
+    decodedOriginalName = Buffer.from(originalname, 'latin1').toString('utf8');
+  } catch (e) {
+    // 如果解码失败，使用原始文件名
+    decodedOriginalName = originalname;
+  }
+  
+  let data = normalizeData(loadData());
+  if (!Array.isArray(data.files)) {
+    data.files = [];
+  }
+  
+  const newFile = {
+    id: nextId(data.files),
+    originalName: decodedOriginalName,
+    filename: filename,
+    url: url,
+    mimetype: mimetype,
+    size: size,
+    uploader: req.session.account,
+    uploadedAt: new Date().toISOString()
+  };
+  
+  data.files.push(newFile);
+  saveData(data);
+  
+  res.json({ 
+    success: true, 
+    file: newFile,
+    message: '文件上传成功'
+  });
+});
+
+// 删除文件（仅超管）
+app.delete('/api/files/:id', requireSuperAdmin, (req, res) => {
+  const fileId = parseInt(req.params.id);
+  
+  let data = normalizeData(loadData());
+  if (!Array.isArray(data.files)) {
+    data.files = [];
+  }
+  
+  const fileIndex = data.files.findIndex(f => f.id === fileId);
+  if (fileIndex === -1) {
+    return res.status(404).json({ message: '文件不存在' });
+  }
+  
+  const file = data.files[fileIndex];
+  
+  // 删除物理文件
+  const filePath = path.join(FILES_DIR, file.filename);
+  if (fs.existsSync(filePath)) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch (err) {
+      console.error('删除文件失败:', err);
+    }
+  }
+  
+  // 从数据库删除记录
+  data.files.splice(fileIndex, 1);
+  saveData(data);
+  
+  res.json({ success: true, message: '文件删除成功' });
 });
 
 // 生产环境：构建后的前端放在 client/dist，与 API 同端口同源（axios 生产环境不写 baseURL）

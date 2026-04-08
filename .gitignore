@@ -5,4 +5,5 @@ server/data.json
 client/dist/
 server/uploads/
 server/carousel/
+server/files/
 *.zip

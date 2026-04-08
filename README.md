@@ -2,6 +2,10 @@
 
 一个简洁美观的个人博客系统，支持动态发布和长文章写作。
 
+> 💡 **扩展项目**: 如需了解 CloudBase 多语言后端服务，请查看 [CloudBase-MultiLang-Services](./CloudBase-MultiLang-Services/) 目录。
+
+---
+
 ## 功能特性
 
 - 🔐 密码验证登录系统

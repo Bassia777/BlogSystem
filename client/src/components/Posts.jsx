@@ -126,19 +126,10 @@ function Posts({ isGuest }) {
           {posts.map(post => (
             <div key={post.id} className="post-card">
               <div className="post-header">
-                <div>
+                <div className="post-meta">
                   <span className="post-author">作者: {post.author || '匿名'}</span>
                   <span className="post-time">{formatDate(post.created_at)}</span>
                 </div>
-                {!isGuest && currentRole === 'superadmin' && (
-                  <button 
-                    className="delete-button" 
-                    onClick={() => handleDeletePost(post.id)}
-                    title="删除帖子"
-                  >
-                    删除
-                  </button>
-                )}
               </div>
               <div className="post-content">{post.content}</div>
 
@@ -182,12 +173,22 @@ function Posts({ isGuest }) {
                       }
                     }}
                   />
-                  <button
-                    className="reply-button"
-                    onClick={() => handleReplySubmit(post.id)}
-                  >
-                    回复
-                  </button>
+                  <div className="reply-actions">
+                    <button
+                      className="reply-button"
+                      onClick={() => handleReplySubmit(post.id)}
+                    >
+                      回复
+                    </button>
+                    {currentRole === 'superadmin' && (
+                      <button 
+                        className="delete-post-button" 
+                        onClick={() => handleDeletePost(post.id)}
+                      >
+                        删除
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
