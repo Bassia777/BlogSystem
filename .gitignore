@@ -2,6 +2,11 @@ node_modules/
 server/node_modules/
 client/node_modules/
 server/data.json
+server/data.json.backup
+server/*.db
+server/*.db-journal
+server/*-json.js.backup
+server/server-sqlite.js
 client/dist/
 server/uploads/
 server/carousel/

@@ -6,11 +6,11 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { initDB, userDB, sessionDB, postDB, articleDB, imageDB, fileDB, settingDB } = require('./database');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
-const DATA_FILE = path.join(__dirname, 'data.json');
 const UPLOADS_DIR = path.join(__dirname, 'uploads');
 const SESSION_DAYS = 7;
 const CREDENTIAL_RE = /^[a-zA-Z0-9]{1,8}$/;
@@ -20,7 +20,7 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
-// 配置multer用于文件上传
+// 配置multer用于图片上传
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, UPLOADS_DIR);
@@ -35,7 +35,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 限制5MB
+    fileSize: 5 * 1024 * 1024
   },
   fileFilter: function (req, file, cb) {
     const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
@@ -47,77 +47,6 @@ const upload = multer({
   }
 });
 
-function loadData() {
-  try {
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
-
-function nextId(items) {
-  if (!items.length) return 1;
-  return Math.max(...items.map((x) => x.id)) + 1;
-}
-
-function normalizeData(d) {
-  if (!Array.isArray(d.users)) d.users = [];
-  if (!Array.isArray(d.sessions)) d.sessions = [];
-  if (!Array.isArray(d.posts)) d.posts = [];
-  if (!Array.isArray(d.replies)) d.replies = [];
-  if (!Array.isArray(d.articles)) d.articles = [];
-  if (!Array.isArray(d.images)) d.images = [];
-  if (!Array.isArray(d.files)) d.files = [];
-  if (!d.settings || typeof d.settings !== 'object') d.settings = {};
-
-  const now = Date.now();
-  d.sessions = d.sessions.filter((s) => new Date(s.expiresAt).getTime() > now);
-
-  if (!d.users.some((u) => u.account === 'admin')) {
-    const plain = '123';
-    d.users.push({
-      id: nextId(d.users),
-      account: 'admin',
-      passwordHash: bcrypt.hashSync(plain, 10),
-      passwordPlain: plain,
-      role: 'superadmin'
-    });
-  } else {
-    const adminUser = d.users.find((u) => u.account === 'admin');
-    if (adminUser && adminUser.passwordPlain !== '123') {
-      const plain = '123';
-      adminUser.passwordPlain = plain;
-      adminUser.passwordHash = bcrypt.hashSync(plain, 10);
-      adminUser.role = 'superadmin';
-    }
-  }
-
-  // 明文与哈希不一致时（改库、损坏、旧 bug），以 passwordPlain 为准重算并落盘
-  let repairedUserSecrets = false;
-  for (const u of d.users) {
-    if (u.passwordPlain && CREDENTIAL_RE.test(u.passwordPlain)) {
-      const ok =
-        u.passwordHash &&
-        bcrypt.compareSync(u.passwordPlain, u.passwordHash);
-      if (!ok) {
-        u.passwordHash = bcrypt.hashSync(u.passwordPlain, 10);
-        repairedUserSecrets = true;
-      }
-    }
-  }
-  if (repairedUserSecrets) {
-    saveData(d);
-  }
-
-  delete d.settings.password;
-  return d;
-}
-
 function validateCredential(str, label) {
   if (!str || typeof str !== 'string') return `${label}不能为空`;
   if (!CREDENTIAL_RE.test(str)) {
@@ -126,20 +55,30 @@ function validateCredential(str, label) {
   return null;
 }
 
-function getSession(req) {
+async function getSession(req) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith('Bearer ')) return null;
   const token = h.slice(7).trim();
   if (!token) return null;
-  const data = normalizeData(loadData());
-  const s = data.sessions.find(
-    (x) => x.token === token && new Date(x.expiresAt).getTime() > Date.now()
-  );
-  return s || null;
+  
+  // 清理过期会话
+  await sessionDB.cleanExpired();
+  
+  // 获取会话
+  const session = await sessionDB.get(token);
+  if (!session) return null;
+  
+  // 检查是否过期
+  if (new Date(session.expires_at).getTime() <= Date.now()) {
+    await sessionDB.delete(token);
+    return null;
+  }
+  
+  return session;
 }
 
-function requireSuperAdmin(req, res, next) {
-  const s = getSession(req);
+async function requireSuperAdmin(req, res, next) {
+  const s = await getSession(req);
   if (!s) return res.status(401).json({ message: '未登录或会话已过期' });
   if (s.role !== 'superadmin') {
     return res.status(403).json({ message: '需要超管权限' });
@@ -149,419 +88,342 @@ function requireSuperAdmin(req, res, next) {
 }
 
 app.use(cors());
-app.use(bodyParser.json());
-app.use('/uploads', express.static(UPLOADS_DIR)); // 静态文件服务
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use('/uploads', express.static(UPLOADS_DIR));
 
-app.post('/api/auth/login', (req, res) => {
-  const { account, password } = req.body || {};
-  const errA = validateCredential(account, '账号');
-  const errP = validateCredential(password, '密码');
-  if (errA) return res.status(400).json({ success: false, message: errA });
-  if (errP) return res.status(400).json({ success: false, message: errP });
+app.get('/', (req, res) => {
+  res.json({ 
+    message: '博客系统 API',
+    docs: 'POST /api/auth/login 登录，返回 token 放入 Authorization: Bearer <token> 请求其他接口'
+  });
+});
 
-  let data = normalizeData(loadData());
-  const user = data.users.find((u) => u.account === account);
-  if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
-    return res.status(401).json({ success: false, message: '账号或密码错误' });
+// ============ 登录注册 API ============
+
+app.post('/api/auth/login', async (req, res) => {
+  const { account, password } = req.body;
+  
+  // 游客模式
+  if (account === 'guest' && password === 'guest') {
+    const guestToken = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    
+    await sessionDB.create(guestToken, 'guest', 'guest', expiresAt);
+    
+    return res.json({
+      token: guestToken,
+      account: 'guest',
+      role: 'guest',
+      message: '游客登录成功'
+    });
+  }
+  
+  const errAcc = validateCredential(account, '账号');
+  if (errAcc) return res.status(400).json({ message: errAcc });
+  
+  const errPwd = validateCredential(password, '密码');
+  if (errPwd) return res.status(400).json({ message: errPwd });
+
+  const user = await userDB.getByAccount(account);
+  if (!user) {
+    return res.status(401).json({ message: '账号或密码错误' });
+  }
+
+  const match = bcrypt.compareSync(password, user.password_hash);
+  if (!match) {
+    return res.status(401).json({ message: '账号或密码错误' });
   }
 
   const token = crypto.randomBytes(32).toString('hex');
-  const expiresAt = new Date(
-    Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000
-  ).toISOString();
-  data.sessions.push({
+  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  
+  await sessionDB.create(token, user.account, user.role, expiresAt);
+
+  res.json({
     token,
     account: user.account,
     role: user.role,
-    expiresAt
-  });
-  saveData(data);
-
-  res.json({
-    success: true,
-    token,
-    account: user.account,
-    role: user.role
+    message: '登录成功'
   });
 });
 
-app.post('/api/auth/logout', (req, res) => {
-  const h = req.headers.authorization;
-  if (h && h.startsWith('Bearer ')) {
-    const token = h.slice(7).trim();
-    let data = normalizeData(loadData());
-    data.sessions = data.sessions.filter((s) => s.token !== token);
-    saveData(data);
+app.post('/api/auth/logout', async (req, res) => {
+  const s = await getSession(req);
+  if (s) {
+    await sessionDB.delete(s.token);
   }
-  res.json({ ok: true });
+  res.json({ message: '退出成功' });
 });
 
-app.get('/api/users', requireSuperAdmin, (req, res) => {
-  const data = normalizeData(loadData());
-  const list = data.users.map((u) => ({
-    id: u.id,
-    account: u.account,
-    role: u.role,
-    password: u.passwordPlain || ''
-  }));
-  res.json(list);
+app.get('/api/auth/me', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) {
+    return res.status(401).json({ message: '未登录' });
+  }
+  res.json({ account: s.account, role: s.role });
 });
 
-app.post('/api/users', requireSuperAdmin, (req, res) => {
-  const { account, password } = req.body || {};
-  const errA = validateCredential(account, '账号');
-  const errP = validateCredential(password, '密码');
-  if (errA) return res.status(400).json({ message: errA });
-  if (errP) return res.status(400).json({ message: errP });
+// ============ 用户管理 API（超管）============
 
-  let data = normalizeData(loadData());
-  if (data.users.some((u) => u.account === account)) {
-    return res.status(400).json({ message: '该账号已存在' });
+app.get('/api/users', requireSuperAdmin, async (req, res) => {
+  const users = await userDB.getAll();
+  res.json({ users });
+});
+
+app.post('/api/users', requireSuperAdmin, async (req, res) => {
+  const { account, password, role } = req.body;
+  
+  const errAcc = validateCredential(account, '账号');
+  if (errAcc) return res.status(400).json({ message: errAcc });
+  
+  const errPwd = validateCredential(password, '密码');
+  if (errPwd) return res.status(400).json({ message: errPwd });
+
+  const existing = await userDB.getByAccount(account);
+  if (existing) {
+    return res.status(400).json({ message: '账号已存在' });
   }
 
-  const id = nextId(data.users);
-  const row = {
-    id,
-    account,
-    passwordHash: bcrypt.hashSync(password, 10),
-    passwordPlain: password,
-    role: 'user'
-  };
-  data.users.push(row);
-  saveData(data);
-  res.json({
-    id: row.id,
-    account: row.account,
-    role: row.role,
-    password: row.passwordPlain
-  });
+  const passwordHash = bcrypt.hashSync(password, 10);
+  await userDB.create(account, passwordHash, password, role || 'user');
+  
+  res.json({ message: '用户创建成功' });
 });
 
-app.patch('/api/users/:id/password', requireSuperAdmin, (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { password } = req.body || {};
-  const errP = validateCredential(password, '密码');
-  if (errP) return res.status(400).json({ message: errP });
+app.put('/api/users/:id', requireSuperAdmin, async (req, res) => {
+  const userId = parseInt(req.params.id);
+  const { account, password, role } = req.body;
+  
+  const errAcc = validateCredential(account, '账号');
+  if (errAcc) return res.status(400).json({ message: errAcc });
 
-  let data = normalizeData(loadData());
-  const user = data.users.find((u) => u.id === id);
-  if (!user) return res.status(404).json({ message: '用户不存在' });
-
-  user.passwordHash = bcrypt.hashSync(password, 10);
-  user.passwordPlain = password;
-  saveData(data);
-  res.json({ ok: true });
-});
-
-app.delete('/api/users/:id', requireSuperAdmin, (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  let data = normalizeData(loadData());
-  const user = data.users.find((u) => u.id === id);
-  if (!user) return res.status(404).json({ message: '用户不存在' });
-  if (user.account === 'root') {
-    return res.status(403).json({ message: '不能删除超管账号 root' });
+  let passwordHash, passwordPlain;
+  if (password) {
+    const errPwd = validateCredential(password, '密码');
+    if (errPwd) return res.status(400).json({ message: errPwd });
+    passwordHash = bcrypt.hashSync(password, 10);
+    passwordPlain = password;
+  } else {
+    const user = await userDB.get(userId);
+    if (!user) return res.status(404).json({ message: '用户不存在' });
+    passwordHash = user.password_hash;
+    passwordPlain = user.password_plain;
   }
-  data.users = data.users.filter((u) => u.id !== id);
-  data.sessions = data.sessions.filter((s) => s.account !== user.account);
-  saveData(data);
-  res.json({ ok: true });
+
+  await userDB.update(userId, account, passwordHash, passwordPlain, role || 'user');
+  res.json({ message: '用户更新成功' });
 });
 
-app.get('/api/posts', (req, res) => {
-  let data = normalizeData(loadData());
-  const page = parseInt(req.query.page, 10) || 1;
-  const limit = 10;
-  const offset = (page - 1) * limit;
+app.delete('/api/users/:id', requireSuperAdmin, async (req, res) => {
+  const userId = parseInt(req.params.id);
+  
+  if (userId === 1) {
+    return res.status(400).json({ message: '不能删除超管账号' });
+  }
 
-  const sorted = [...data.posts].sort(
-    (a, b) => new Date(b.created_at) - new Date(a.created_at)
-  );
-  const total = sorted.length;
-  const pagePosts = sorted.slice(offset, offset + limit);
+  await userDB.delete(userId);
+  res.json({ message: '用户删除成功' });
+});
 
-  const postsWithReplies = pagePosts.map((post) => {
-    const replies = data.replies
-      .filter((r) => r.post_id === post.id)
-      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    return { ...post, replies };
-  });
+// ============ 随笔 API ============
 
-  res.json({
-    posts: postsWithReplies,
-    total,
-    page,
-    totalPages: Math.max(1, Math.ceil(total / limit))
+app.get('/api/posts', async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const pageSize = 10;
+  
+  const result = await postDB.getPage(page, pageSize);
+  res.json({ 
+    posts: result.posts, 
+    totalPages: result.totalPages,
+    currentPage: page
   });
 });
 
-app.post('/api/posts', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
+app.post('/api/posts', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  if (s.role === 'guest') return res.status(403).json({ message: '游客不能发布' });
   
   const { content } = req.body;
-  let data = normalizeData(loadData());
-  const id = nextId(data.posts);
-  const created_at = new Date().toISOString();
-  const post = { 
-    id, 
-    content, 
-    created_at,
-    author: session.account  // 添加作者信息
-  };
-  data.posts.push(post);
-  saveData(data);
-  res.json({ ...post, replies: [] });
+  if (!content || !content.trim()) {
+    return res.status(400).json({ message: '内容不能为空' });
+  }
+
+  await postDB.create(content, s.account);
+  res.json({ message: '发布成功' });
 });
 
-app.post('/api/posts/:id/replies', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
+app.delete('/api/posts/:id', requireSuperAdmin, async (req, res) => {
+  const postId = parseInt(req.params.id);
+  await postDB.delete(postId);
+  res.json({ message: '删除成功' });
+});
+
+app.post('/api/posts/:id/replies', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  if (s.role === 'guest') return res.status(403).json({ message: '游客不能回复' });
   
-  const postId = parseInt(req.params.id, 10);
+  const postId = parseInt(req.params.id);
   const { content } = req.body;
-  let data = normalizeData(loadData());
-  if (!data.posts.some((p) => p.id === postId)) {
-    return res.status(404).json({ message: '动态不存在' });
+  
+  if (!content || !content.trim()) {
+    return res.status(400).json({ message: '回复内容不能为空' });
   }
-  const id = nextId(data.replies);
-  const created_at = new Date().toISOString();
-  const reply = { 
-    id, 
-    post_id: postId, 
-    content, 
-    created_at,
-    author: session.account
-  };
-  data.replies.push(reply);
-  saveData(data);
-  res.json(reply);
+
+  await postDB.addReply(postId, content, s.account);
+  res.json({ message: '回复成功' });
 });
 
-// 删除评论 - 超管或评论作者可删除
-app.delete('/api/posts/:postId/replies/:replyId', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
+app.delete('/api/posts/:postId/replies/:replyId', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
   
-  const postId = parseInt(req.params.postId, 10);
-  const replyId = parseInt(req.params.replyId, 10);
-  let data = normalizeData(loadData());
-  
-  const replyIndex = data.replies.findIndex((r) => r.id === replyId && r.post_id === postId);
-  if (replyIndex === -1) {
-    return res.status(404).json({ message: '评论不存在' });
-  }
-  
-  const reply = data.replies[replyIndex];
-  if (session.role !== 'superadmin' && reply.author !== session.account) {
-    return res.status(403).json({ message: '只能删除自己的评论' });
-  }
-  
-  data.replies.splice(replyIndex, 1);
-  saveData(data);
-  res.json({ success: true, message: '删除成功' });
+  const replyId = parseInt(req.params.replyId);
+  await postDB.deleteReply(replyId);
+  res.json({ message: '删除成功' });
 });
 
-// 删除帖子 - 仅超管可删除
-app.delete('/api/posts/:id', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
-  if (session.role !== 'superadmin') {
-    return res.status(403).json({ message: '只有超管才能删除帖子' });
-  }
-  
-  const postId = parseInt(req.params.id, 10);
-  let data = normalizeData(loadData());
-  
-  const postIndex = data.posts.findIndex((p) => p.id === postId);
-  if (postIndex === -1) {
-    return res.status(404).json({ message: '帖子不存在' });
-  }
-  
-  // 删除帖子和相关回复
-  data.posts.splice(postIndex, 1);
-  data.replies = data.replies.filter((r) => r.post_id !== postId);
-  
-  saveData(data);
-  res.json({ success: true, message: '删除成功' });
+// ============ 博文 API ============
+
+app.get('/api/articles', async (req, res) => {
+  const articles = await articleDB.getAll();
+  res.json({ articles });
 });
 
-app.get('/api/articles', (req, res) => {
-  let data = normalizeData(loadData());
-  const articles = [...data.articles].sort(
-    (a, b) => new Date(b.created_at) - new Date(a.created_at)
-  );
-  res.json(articles);
-});
-
-app.get('/api/articles/:id', (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  let data = normalizeData(loadData());
-  const article = data.articles.find((a) => a.id === id);
-  if (!article) return res.status(404).json({ message: '文章不存在' });
-  res.json(article);
-});
-
-app.post('/api/articles', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
-  
-  const { title, content } = req.body;
-  if (content && content.length > 2000) {
-    return res.status(400).json({ message: '文章内容不能超过2000字' });
-  }
-  let data = normalizeData(loadData());
-  const id = nextId(data.articles);
-  const created_at = new Date().toISOString();
-  const article = { 
-    id, 
-    title, 
-    content, 
-    created_at,
-    author: session.account
-  };
-  data.articles.push(article);
-  saveData(data);
-  res.json(article);
-});
-
-// 编辑文章 - 超管或作者本人可编辑
-app.put('/api/articles/:id', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
-  
-  const articleId = parseInt(req.params.id, 10);
-  const { title, content } = req.body;
-  
-  if (content && content.length > 2000) {
-    return res.status(400).json({ message: '文章内容不能超过2000字' });
-  }
-  
-  let data = normalizeData(loadData());
-  const article = data.articles.find((a) => a.id === articleId);
+app.get('/api/articles/:id', async (req, res) => {
+  const id = parseInt(req.params.id);
+  const article = await articleDB.get(id);
   
   if (!article) {
-    return res.status(404).json({ message: '文章不存在' });
+    return res.status(404).json({ message: '博文不存在' });
   }
   
-  if (session.role !== 'superadmin' && article.author !== session.account) {
-    return res.status(403).json({ message: '只能编辑自己的文章' });
-  }
-  
-  article.title = title;
-  article.content = content;
-  article.updated_at = new Date().toISOString();
-  
-  saveData(data);
-  res.json(article);
+  res.json({ article });
 });
 
-// 删除文章 - 超管或作者本人可删除
-app.delete('/api/articles/:id', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
+app.post('/api/articles', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  if (s.role === 'guest') return res.status(403).json({ message: '游客不能发布' });
   
-  const articleId = parseInt(req.params.id, 10);
-  let data = normalizeData(loadData());
+  const { title, content } = req.body;
   
-  const articleIndex = data.articles.findIndex((a) => a.id === articleId);
-  if (articleIndex === -1) {
-    return res.status(404).json({ message: '文章不存在' });
+  if (!title || !title.trim()) {
+    return res.status(400).json({ message: '标题不能为空' });
+  }
+  if (!content || !content.trim()) {
+    return res.status(400).json({ message: '内容不能为空' });
+  }
+
+  await articleDB.create(title, content, s.account);
+  res.json({ message: '博文创建成功' });
+});
+
+app.put('/api/articles/:id', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  if (s.role === 'guest') return res.status(403).json({ message: '游客不能编辑' });
+  
+  const id = parseInt(req.params.id);
+  const { title, content } = req.body;
+  
+  const article = await articleDB.get(id);
+  if (!article) {
+    return res.status(404).json({ message: '博文不存在' });
   }
   
-  const article = data.articles[articleIndex];
-  if (session.role !== 'superadmin' && article.author !== session.account) {
-    return res.status(403).json({ message: '只能删除自己的文章' });
+  if (s.role !== 'superadmin' && article.author !== s.account) {
+    return res.status(403).json({ message: '只能编辑自己的博文' });
+  }
+
+  await articleDB.update(id, title, content);
+  res.json({ message: '博文更新成功' });
+});
+
+app.delete('/api/articles/:id', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  if (s.role === 'guest') return res.status(403).json({ message: '游客不能删除' });
+  
+  const id = parseInt(req.params.id);
+  const article = await articleDB.get(id);
+  
+  if (!article) {
+    return res.status(404).json({ message: '博文不存在' });
   }
   
-  data.articles.splice(articleIndex, 1);
-  saveData(data);
-  res.json({ success: true, message: '删除成功' });
+  if (s.role !== 'superadmin' && article.author !== s.account) {
+    return res.status(403).json({ message: '只能删除自己的博文' });
+  }
+
+  await articleDB.delete(id);
+  res.json({ message: '博文删除成功' });
 });
 
 // ============ 图片长廊 API ============
 
-// 获取所有图片
-app.get('/api/gallery', (req, res) => {
-  let data = normalizeData(loadData());
-  const images = [...data.images].sort(
-    (a, b) => new Date(b.created_at) - new Date(a.created_at)
-  );
+app.get('/api/images', async (req, res) => {
+  const images = await imageDB.getAll();
   res.json({ images });
 });
 
-// 上传图片
-app.post('/api/gallery', upload.single('image'), (req, res) => {
-  const session = getSession(req);
-  if (!session) {
-    // 删除已上传的文件
-    if (req.file) {
-      fs.unlinkSync(req.file.path);
+app.post('/api/images/upload', async (req, res, next) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  if (s.role === 'guest') return res.status(403).json({ message: '游客不能上传' });
+  
+  upload.single('image')(req, res, async function(err) {
+    if (err) {
+      return res.status(400).json({ message: err.message });
     }
-    return res.status(401).json({ message: '未登录' });
-  }
+    
+    if (!req.file) {
+      return res.status(400).json({ message: '请选择图片' });
+    }
 
-  if (!req.file) {
-    return res.status(400).json({ message: '请选择图片文件' });
-  }
-
-  let data = normalizeData(loadData());
-  const id = nextId(data.images);
-  const created_at = new Date().toISOString();
-  const image = {
-    id,
-    filename: req.file.filename,
-    url: `/uploads/${req.file.filename}`,
-    author: session.account,
-    created_at
-  };
-
-  data.images.push(image);
-  saveData(data);
-  res.json({ success: true, image });
+    const url = `/uploads/${req.file.filename}`;
+    await imageDB.create(url, req.file.filename, s.account);
+    
+    res.json({ 
+      message: '上传成功',
+      url,
+      filename: req.file.filename
+    });
+  });
 });
 
-// 删除图片 - 超管或上传者本人可删除
-app.delete('/api/gallery/:id', (req, res) => {
-  const session = getSession(req);
-  if (!session) return res.status(401).json({ message: '未登录' });
-
-  const imageId = parseInt(req.params.id, 10);
-  let data = normalizeData(loadData());
-
-  const imageIndex = data.images.findIndex((img) => img.id === imageId);
-  if (imageIndex === -1) {
+app.delete('/api/images/:id', async (req, res) => {
+  const s = await getSession(req);
+  if (!s) return res.status(401).json({ message: '请先登录' });
+  
+  const imageId = parseInt(req.params.id);
+  const image = await imageDB.get(imageId);
+  
+  if (!image) {
     return res.status(404).json({ message: '图片不存在' });
   }
-
-  const image = data.images[imageIndex];
-
-  // 检查权限：超管或上传者本人
-  if (session.role !== 'superadmin' && session.account !== image.author) {
-    return res.status(403).json({ message: '只有超管和上传者本人可以删除图片' });
+  
+  if (s.role !== 'superadmin' && image.uploader !== s.account) {
+    return res.status(403).json({ message: '只能删除自己上传的图片' });
   }
 
-  // 删除文件
-  const filepath = path.join(UPLOADS_DIR, image.filename);
-  if (fs.existsSync(filepath)) {
-    fs.unlinkSync(filepath);
+  const filePath = path.join(UPLOADS_DIR, image.filename);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
   }
 
-  // 从数据库删除
-  data.images.splice(imageIndex, 1);
-  saveData(data);
-
-  res.json({ success: true, message: '删除成功' });
+  await imageDB.delete(imageId);
+  res.json({ message: '删除成功' });
 });
 
 // ============ 页面配置 API ============
 
-// 确保carousel目录存在
 const CAROUSEL_DIR = path.join(__dirname, 'carousel');
 if (!fs.existsSync(CAROUSEL_DIR)) {
   fs.mkdirSync(CAROUSEL_DIR, { recursive: true });
 }
 
-// 配置轮播图上传
 const carouselStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, CAROUSEL_DIR);
@@ -587,29 +449,23 @@ const carouselUpload = multer({
   }
 });
 
-// 静态文件服务 - 轮播图
-// 静态文件服务 - 轮播图（长期缓存）
 app.use('/carousel', express.static(CAROUSEL_DIR, {
-  maxAge: '7d', // 图片缓存7天
+  maxAge: '7d',
   etag: true,
   lastModified: true
 }));
 
-// 获取轮播图配置
-app.get('/api/settings/carousel', (req, res) => {
-  let data = normalizeData(loadData());
-  const carouselImages = data.settings.carouselImages || [];
+app.get('/api/settings/carousel', async (req, res) => {
+  const carouselImages = await settingDB.get('carouselImages') || [];
   
-  // 设置缓存控制头：浏览器可缓存24小时
   res.set({
-    'Cache-Control': 'public, max-age=86400', // 24小时 = 86400秒
-    'ETag': `"carousel-${Date.now()}"` // 添加ETag用于验证
+    'Cache-Control': 'public, max-age=86400',
+    'ETag': `"carousel-${Date.now()}"`
   });
   
   res.json({ images: carouselImages });
 });
 
-// 上传轮播图
 app.post('/api/settings/carousel/upload', requireSuperAdmin, carouselUpload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: '请选择图片文件' });
@@ -623,36 +479,29 @@ app.post('/api/settings/carousel/upload', requireSuperAdmin, carouselUpload.sing
   });
 });
 
-// 保存轮播图配置
-app.post('/api/settings/carousel', requireSuperAdmin, (req, res) => {
+app.post('/api/settings/carousel', requireSuperAdmin, async (req, res) => {
   const { images } = req.body;
   
   if (!Array.isArray(images)) {
     return res.status(400).json({ message: '图片列表格式错误' });
   }
 
-  let data = normalizeData(loadData());
-  data.settings.carouselImages = images.filter(img => img);
-  saveData(data);
-
+  await settingDB.set('carouselImages', images.filter(img => img));
   res.json({ success: true, message: '保存成功' });
 });
 
 // ============ 文件管理 API ============
 
-// 确保files目录存在
 const FILES_DIR = path.join(__dirname, 'files');
 if (!fs.existsSync(FILES_DIR)) {
   fs.mkdirSync(FILES_DIR, { recursive: true });
 }
 
-// 配置文件上传（支持多种文件类型）
 const fileStorage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, FILES_DIR);
   },
   filename: function (req, file, cb) {
-    // 使用时间戳 + 随机数作为文件名，避免中文乱码
     const ext = path.extname(file.originalname);
     const timestamp = Date.now();
     const random = Math.round(Math.random() * 1E9);
@@ -663,44 +512,35 @@ const fileStorage = multer.diskStorage({
 const fileUpload = multer({
   storage: fileStorage,
   limits: {
-    fileSize: 50 * 1024 * 1024 // 限制50MB
+    fileSize: 50 * 1024 * 1024
   },
   fileFilter: function (req, file, cb) {
-    // 支持的文件类型
     const allowedTypes = [
-      // 文档
       'application/pdf',
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      // Excel
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      // PPT
       'application/vnd.ms-powerpoint',
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      // 文本
       'text/plain',
       'text/markdown',
       'text/csv',
       'text/x-markdown',
-      'application/octet-stream', // 某些浏览器将.md识别为此类型
-      // 图片
+      'application/octet-stream',
       'image/png',
       'image/jpeg',
       'image/jpg',
       'image/gif',
       'image/webp',
       'image/svg+xml',
-      // 压缩包
       'application/zip',
       'application/x-rar-compressed',
       'application/x-7z-compressed',
-      // 其他
       'application/json',
       'application/xml'
     ];
     
-    // 对于.md文件，特殊处理
     const ext = path.extname(file.originalname).toLowerCase();
     if (ext === '.md' || ext === '.markdown') {
       cb(null, true);
@@ -715,24 +555,18 @@ const fileUpload = multer({
   }
 });
 
-// 静态文件服务 - 文件管理（支持预览和下载）
 app.use('/files', express.static(FILES_DIR, {
   maxAge: '1d',
   etag: true,
   lastModified: true
 }));
 
-// 获取文件列表
-app.get('/api/files', (req, res) => {
-  let data = normalizeData(loadData());
-  if (!Array.isArray(data.files)) {
-    data.files = [];
-  }
-  res.json({ files: data.files });
+app.get('/api/files', async (req, res) => {
+  const files = await fileDB.getAll();
+  res.json({ files });
 });
 
-// 上传文件（仅超管）
-app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), (req, res) => {
+app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: '请选择文件' });
   }
@@ -740,34 +574,15 @@ app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), (req
   const { originalname, filename, mimetype, size } = req.file;
   const url = `/files/${filename}`;
   
-  // 处理中文文件名编码问题
   let decodedOriginalName = originalname;
   try {
-    // 尝试解码可能的乱码
     decodedOriginalName = Buffer.from(originalname, 'latin1').toString('utf8');
   } catch (e) {
-    // 如果解码失败，使用原始文件名
     decodedOriginalName = originalname;
   }
   
-  let data = normalizeData(loadData());
-  if (!Array.isArray(data.files)) {
-    data.files = [];
-  }
-  
-  const newFile = {
-    id: nextId(data.files),
-    originalName: decodedOriginalName,
-    filename: filename,
-    url: url,
-    mimetype: mimetype,
-    size: size,
-    uploader: req.session.account,
-    uploadedAt: new Date().toISOString()
-  };
-  
-  data.files.push(newFile);
-  saveData(data);
+  const fileId = await fileDB.create(decodedOriginalName, filename, url, mimetype, size, req.session.account);
+  const newFile = await fileDB.get(fileId);
   
   res.json({ 
     success: true, 
@@ -776,23 +591,14 @@ app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), (req
   });
 });
 
-// 删除文件（仅超管）
-app.delete('/api/files/:id', requireSuperAdmin, (req, res) => {
+app.delete('/api/files/:id', requireSuperAdmin, async (req, res) => {
   const fileId = parseInt(req.params.id);
   
-  let data = normalizeData(loadData());
-  if (!Array.isArray(data.files)) {
-    data.files = [];
-  }
-  
-  const fileIndex = data.files.findIndex(f => f.id === fileId);
-  if (fileIndex === -1) {
+  const file = await fileDB.get(fileId);
+  if (!file) {
     return res.status(404).json({ message: '文件不存在' });
   }
   
-  const file = data.files[fileIndex];
-  
-  // 删除物理文件
   const filePath = path.join(FILES_DIR, file.filename);
   if (fs.existsSync(filePath)) {
     try {
@@ -802,14 +608,11 @@ app.delete('/api/files/:id', requireSuperAdmin, (req, res) => {
     }
   }
   
-  // 从数据库删除记录
-  data.files.splice(fileIndex, 1);
-  saveData(data);
-  
+  await fileDB.delete(fileId);
   res.json({ success: true, message: '文件删除成功' });
 });
 
-// 生产环境：构建后的前端放在 client/dist，与 API 同端口同源（axios 生产环境不写 baseURL）
+// 生产环境：静态前端
 const clientDist = path.join(__dirname, '../client/dist');
 if (fs.existsSync(path.join(clientDist, 'index.html'))) {
   app.use(express.static(clientDist));
@@ -819,12 +622,13 @@ if (fs.existsSync(path.join(clientDist, 'index.html'))) {
   });
 }
 
-let boot = normalizeData(loadData());
-saveData(boot);
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`服务器运行在 http://0.0.0.0:${PORT} （公网请用云服务器公网 IP + 端口访问）`);
-  console.log(
-    '[blog-api] 多用户模式：登录 POST /api/auth/login 需 JSON { account, password }，超管 admin / 123'
-  );
+// 启动服务器
+initDB().then(() => {
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`服务器运行在 http://0.0.0.0:${PORT} （公网请用云服务器公网 IP + 端口访问）`);
+    console.log('[blog-api] 多用户模式：登录 POST /api/auth/login 需 JSON { account, password }，超管 admin / 123');
+  });
+}).catch((err) => {
+  console.error('❌ 数据库初始化失败:', err);
+  process.exit(1);
 });
