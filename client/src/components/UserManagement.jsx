@@ -21,7 +21,7 @@ function UserManagement() {
     setError('');
     try {
       const { data } = await axios.get('/api/users');
-      setUsers(data);
+      setUsers(data.users || []);
     } catch (e) {
       setError(e.response?.data?.message || '加载失败');
     } finally {

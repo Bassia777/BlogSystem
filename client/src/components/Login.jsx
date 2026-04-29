@@ -102,13 +102,16 @@ function Login({ onLogin }) {
     setLoading(true);
     try {
       const response = await axios.post('/api/auth/login', { account, password });
-      if (response.data.success) {
+      // 后端返回 { token, account, role, message }，没有 success 字段
+      if (response.data.token) {
         const { token, account: acc, role } = response.data;
         localStorage.setItem('token', token);
         localStorage.setItem('account', acc);
         localStorage.setItem('role', role);
         axios.defaults.headers.common.Authorization = `Bearer ${token}`;
         onLogin({ account: acc, role });
+      } else {
+        setError('登录失败：服务器响应异常');
       }
     } catch (err) {
       setError(err.response?.data?.message || '登录失败');

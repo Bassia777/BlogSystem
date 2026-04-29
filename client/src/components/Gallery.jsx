@@ -20,7 +20,7 @@ function Gallery({ isGuest }) {
   const fetchImages = async () => {
     setLoading(true);
     try {
-      const response = await axios.get('/api/gallery');
+      const response = await axios.get('/api/images');
       setImages(response.data.images || []);
     } catch (error) {
       console.error('获取图片失败:', error);

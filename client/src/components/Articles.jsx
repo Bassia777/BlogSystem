@@ -24,7 +24,7 @@ function Articles({ isGuest }) {
   const fetchArticles = async () => {
     try {
       const response = await axios.get('/api/articles');
-      setArticles(response.data);
+      setArticles(response.data.articles || []);
     } catch (error) {
       console.error('获取文章失败:', error);
     }

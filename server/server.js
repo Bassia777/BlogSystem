@@ -492,6 +492,21 @@ app.post('/api/settings/carousel', requireSuperAdmin, async (req, res) => {
 
 // ============ 文件管理 API ============
 
+/** SQLite 列为 snake_case，统一为前端使用的 camelCase */
+function fileRowToJson(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    originalName: row.original_name ?? row.originalName,
+    filename: row.filename,
+    url: row.url,
+    mimetype: row.mimetype,
+    size: row.size,
+    uploader: row.uploader,
+    uploadedAt: row.uploaded_at ?? row.uploadedAt
+  };
+}
+
 const FILES_DIR = path.join(__dirname, 'files');
 if (!fs.existsSync(FILES_DIR)) {
   fs.mkdirSync(FILES_DIR, { recursive: true });
@@ -562,8 +577,8 @@ app.use('/files', express.static(FILES_DIR, {
 }));
 
 app.get('/api/files', async (req, res) => {
-  const files = await fileDB.getAll();
-  res.json({ files });
+  const rows = await fileDB.getAll();
+  res.json({ files: rows.map(fileRowToJson) });
 });
 
 app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), async (req, res) => {
@@ -586,7 +601,7 @@ app.post('/api/files/upload', requireSuperAdmin, fileUpload.single('file'), asyn
   
   res.json({ 
     success: true, 
-    file: newFile,
+    file: fileRowToJson(newFile),
     message: '文件上传成功'
   });
 });
